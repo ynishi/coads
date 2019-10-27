@@ -1,24 +1,17 @@
 from datetime import datetime
 from dateutil import tz
-import boto3
+
 from flask_restful import Resource, reqparse
-from google.api_core import protobuf_helpers
-import google.ads.google_ads.client
-
-from coads import conversion
 
 
-class TokenRepository:
-    def get_token(self, id):
-        return {
-            'developer_token': '',
-            'client_id': id,
-            'client_secret': '',
-            'refresh_token': 'xx'
-        }
+from coads import conversion, repository
 
 
-tokenRepository = TokenRepository()
+tokenRepository = repository.TokenRepository()
+
+clientFactory = repository.ClientFactory()
+
+conversionS3Repository = repository.ConversionS3Repository()
 
 defaultConversion = None
 
@@ -26,7 +19,7 @@ defaultConversion = None
 class Conversion(Resource):
     """Conversion is a handler. Recieve Conversion and put them to Google.
     """
-    dc = None
+    config = None
 
     def get(self, customer_id):
 
@@ -40,6 +33,17 @@ class Conversion(Resource):
 
         args = parser.parse_args()
 
+        # auth and get user
+        try:
+            token = tokenRepository.get_token(customer_id)
+            authed_client = clientFactory.get_client(token)
+        except Exception as e:
+            # log
+            print(e)
+            return "Auth Failed"
+        if authed_client is None:
+            return "Auth Failed"
+
         actioned_at_date = datetime.strptime(args.actioned_at, '%Y%m%d%H%M%S')
         actioned_at_date.replace(tzinfo=tz.gettz('Asia/Tokyo'))
         gconversion = conversion.Conversion(
@@ -50,20 +54,23 @@ class Conversion(Resource):
             actioned_at=actioned_at_date,
         ).to_google_click_conversion(defaultConversion)
 
-        token = tokenRepository.get_token(customer_id)
-        authed_client = (google.ads.google_ads.client.GoogleAdsClient
-                         .load_from_dict(token))
-
         conversion_upload_service = authed_client.get_service(
             'ConversionUploadService', version='v2')
-        response = conversion_upload_service.upload_click_conversions(
-            customer_id,
-            [gconversion],
-            partial_failure=True,
-            validate_only=False)
+        try:
+            response = conversion_upload_service.upload_click_conversions(
+                customer_id,
+                [gconversion],
+                partial_failure=True,
+                validate_only=False)
+        except Exception as e:
+            print(e)
+            return "Internal Error"
 
-        s3 = boto3.client('s3')
-        bucket = self.s3.put_object(
-            config.bucketname, args.click_id, args.click_id)
+        try:
+            conversionS3Repository.put_dict(
+                self.config['bucketname'], args.click_id, args.click_id)
+        except Exception as e:
+            print(e)
+            return "Internal Error"
 
         return "OK"
