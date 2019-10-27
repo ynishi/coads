@@ -19,6 +19,7 @@ class DevConfig(Config):
 class TestConfig(Config):
     DEBUG = True
     TESTING = True
+    USER = 'user1'
 
 
 class ProdConfig(Config):

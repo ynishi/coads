@@ -1,7 +1,6 @@
 from unittest import TestCase, mock
 from datetime import datetime
 from dateutil import tz
-import google.ads.google_ads.client
 from coads.conversion import Conversion
 
 
